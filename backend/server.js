@@ -29,9 +29,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/eduos')
-  .then(() => console.log('✅ MongoDB connected'))
-  .catch((err) => console.error('❌ MongoDB connection error:', err));
+const mongoURI = process.env.MONGODB_URI || 'mongodb://localhost:27017/erp_model';
+console.log(`🔗 Connecting to MongoDB: ${mongoURI.replace(/\/\/.*@/, '//***:***@')}`); // Hide credentials if any
+
+mongoose.connect(mongoURI)
+  .then(() => {
+    console.log('✅ MongoDB connected');
+    console.log(`📊 Database: ${mongoose.connection.db.databaseName}`);
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err);
+    console.error('💡 Make sure MongoDB is running and the connection string is correct');
+  });
 
 // Routes
 app.use('/api/auth', authRoutes);

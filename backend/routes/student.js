@@ -1,9 +1,12 @@
 import express from 'express';
 import { authenticate, authorize } from '../middleware/auth.js';
+import User from '../models/User.js';
 import Attendance from '../models/Attendance.js';
 import Marks from '../models/Marks.js';
 import Checkin from '../models/Checkin.js';
 import MedicalRequest from '../models/MedicalRequest.js';
+import DailyAttendance from '../models/DailyAttendance.js';
+import ActivityLog from '../models/ActivityLog.js';
 import { getStudentSummary } from '../services/gemini.js';
 
 const router = express.Router();
@@ -131,6 +134,132 @@ router.get('/medical-requests', async (req, res) => {
       .sort({ createdAt: -1 });
     res.json(medicalRequests);
   } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Mark daily attendance (check-in)
+router.post('/mark-attendance', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check if already marked attendance today
+    const existingAttendance = await DailyAttendance.findOne({
+      userId,
+      date: {
+        $gte: today,
+        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+      }
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({ message: 'Attendance already marked for today' });
+    }
+
+    // Check if it's school hours (8 AM - 5 PM)
+    const currentHour = new Date().getHours();
+    const isSchoolHours = currentHour >= 8 && currentHour < 17;
+
+    if (!isSchoolHours) {
+      return res.status(400).json({ message: 'Attendance can only be marked during school hours (8 AM - 5 PM)' });
+    }
+
+    // Determine if late (after 9 AM)
+    const status = currentHour > 9 ? 'late' : 'present';
+
+    const attendance = new DailyAttendance({
+      userId,
+      role: 'student',
+      date: today,
+      checkInTime: new Date(),
+      status
+    });
+
+    await attendance.save();
+
+    // Log activity
+    await ActivityLog.create({
+      userId,
+      role: 'student',
+      action: 'mark_attendance',
+      details: { status, checkInTime: attendance.checkInTime },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(201).json({ message: 'Attendance marked successfully', attendance });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Attendance already marked for today' });
+    }
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get daily attendance history
+router.get('/daily-attendance', async (req, res) => {
+  try {
+    const attendance = await DailyAttendance.find({ userId: req.user.id })
+      .sort({ date: -1 })
+      .limit(30);
+    res.json(attendance);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// AI Chatbot - Ask questions and get guidance
+router.post('/chatbot', async (req, res) => {
+  try {
+    const { question } = req.body;
+
+    if (!question || !question.trim()) {
+      return res.status(400).json({ message: 'Question is required' });
+    }
+
+    // Get student data for context
+    const student = await User.findById(req.user.id);
+    const attendanceRecords = await Attendance.find({ studentId: req.user.id });
+    const marksRecords = await Marks.find({ studentId: req.user.id });
+
+    let avgAttendance = 0;
+    if (attendanceRecords.length > 0) {
+      avgAttendance = Math.round(
+        attendanceRecords.reduce((sum, a) => sum + a.percentage, 0) / attendanceRecords.length
+      );
+    }
+
+    let avgMarks = 0;
+    const subjects = [];
+    if (marksRecords.length > 0) {
+      const marksBySubject = {};
+      marksRecords.forEach(record => {
+        if (!marksBySubject[record.subject]) {
+          marksBySubject[record.subject] = [];
+          subjects.push(record.subject);
+        }
+        marksBySubject[record.subject].push(record.score);
+      });
+      avgMarks = Math.round(
+        marksRecords.reduce((sum, m) => sum + m.score, 0) / marksRecords.length
+      );
+    }
+
+    const studentData = {
+      name: student.name,
+      attendance: avgAttendance,
+      marks: avgMarks,
+      subjects: subjects
+    };
+
+    const { answerStudentQuestion } = await import('../services/gemini.js');
+    const answer = await answerStudentQuestion(question, studentData);
+
+    res.json({ answer });
+  } catch (error) {
+    console.error('Chatbot error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

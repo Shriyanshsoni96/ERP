@@ -27,6 +27,16 @@ const userSchema = new mongoose.Schema({
   classId: {
     type: String,
     default: null
+  },
+  studentId: {
+    type: String,
+    unique: true,
+    sparse: true, // Allows null values but ensures uniqueness when present
+    trim: true
+  },
+  faceData: {
+    type: String, // Store face recognition data (base64 or descriptor)
+    default: null
   }
 }, {
   timestamps: true

@@ -142,3 +142,43 @@ export async function summarizeMedicalRequest(reason) {
   }
 }
 
+/**
+ * Answer student questions and provide guidance
+ */
+export async function answerStudentQuestion(question, studentData = null) {
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+    
+    let contextPrompt = '';
+    if (studentData) {
+      contextPrompt = `
+      Student Context:
+      - Name: ${studentData.name || 'Student'}
+      - Average Attendance: ${studentData.attendance || 0}%
+      - Average Marks: ${studentData.marks || 0}%
+      - Subjects: ${studentData.subjects ? JSON.stringify(studentData.subjects) : 'N/A'}
+      `;
+    }
+    
+    const prompt = `You are a friendly and helpful AI tutor assistant for students. Your role is to:
+    1. Answer academic questions clearly and concisely
+    2. Provide study guidance and tips
+    3. Help solve doubts and problems
+    4. Be encouraging and supportive
+    5. Explain concepts in simple, easy-to-understand language
+    
+    ${contextPrompt}
+    
+    Student Question: ${question}
+    
+    Provide a helpful, clear answer. If the question is about academics, provide detailed explanations. If it's about study tips or guidance, be practical and actionable. Keep responses conversational and friendly, but informative.`;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error('Gemini API error:', error);
+    return "I'm having trouble processing your question right now. Please try again in a moment, or rephrase your question.";
+  }
+}
+

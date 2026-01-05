@@ -4,6 +4,8 @@ import User from '../models/User.js';
 import Attendance from '../models/Attendance.js';
 import Marks from '../models/Marks.js';
 import MedicalRequest from '../models/MedicalRequest.js';
+import DailyAttendance from '../models/DailyAttendance.js';
+import ActivityLog from '../models/ActivityLog.js';
 import { getClassSummary } from '../services/gemini.js';
 
 const router = express.Router();
@@ -200,7 +202,89 @@ router.post('/marks', async (req, res) => {
       { upsert: true, new: true }
     );
 
+    // Log activity
+    await ActivityLog.create({
+      userId: req.user.id,
+      role: 'teacher',
+      action: 'update_marks',
+      details: { studentId, subject, score },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
     res.json({ message: 'Marks updated successfully', marks });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Mark daily attendance (check-in) for teachers
+router.post('/mark-attendance', async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check if already marked attendance today
+    const existingAttendance = await DailyAttendance.findOne({
+      userId,
+      date: {
+        $gte: today,
+        $lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+      }
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({ message: 'Attendance already marked for today' });
+    }
+
+    // Check if it's school hours (8 AM - 5 PM)
+    const currentHour = new Date().getHours();
+    const isSchoolHours = currentHour >= 8 && currentHour < 17;
+
+    if (!isSchoolHours) {
+      return res.status(400).json({ message: 'Attendance can only be marked during school hours (8 AM - 5 PM)' });
+    }
+
+    // Determine if late (after 9 AM)
+    const status = currentHour > 9 ? 'late' : 'present';
+
+    const attendance = new DailyAttendance({
+      userId,
+      role: 'teacher',
+      date: today,
+      checkInTime: new Date(),
+      status
+    });
+
+    await attendance.save();
+
+    // Log activity
+    await ActivityLog.create({
+      userId,
+      role: 'teacher',
+      action: 'mark_attendance',
+      details: { status, checkInTime: attendance.checkInTime },
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(201).json({ message: 'Attendance marked successfully', attendance });
+  } catch (error) {
+    if (error.code === 11000) {
+      return res.status(400).json({ message: 'Attendance already marked for today' });
+    }
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Get daily attendance history for teacher
+router.get('/daily-attendance', async (req, res) => {
+  try {
+    const attendance = await DailyAttendance.find({ userId: req.user.id })
+      .sort({ date: -1 })
+      .limit(30);
+    res.json(attendance);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }

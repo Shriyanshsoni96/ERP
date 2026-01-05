@@ -7,7 +7,7 @@ const Register = () => {
     name: '',
     email: '',
     password: '',
-    role: 'student',
+    role: 'teacher',
     classId: ''
   });
   const [error, setError] = useState('');
@@ -107,14 +107,16 @@ const Register = () => {
               required
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              <option value="student">Student</option>
               <option value="teacher">Teacher</option>
-              <option value="admin">Admin</option>
               <option value="doctor">Doctor</option>
+              <option value="admin">Admin</option>
             </select>
+            <p className="mt-2 text-xs text-gray-500">
+              Note: Students cannot register here. They must use their allocated Student ID to login.
+            </p>
           </div>
 
-          {(formData.role === 'student' || formData.role === 'teacher') && (
+          {formData.role === 'teacher' && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Class ID
